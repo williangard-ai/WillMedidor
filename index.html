@@ -314,11 +314,11 @@
 
                 <div class="grid grid-cols-2 gap-3 mb-3">
                     <div class="measure-card">
-                        <div class="measure-label">DP Monocular OD</div>
+                        <div class="measure-label">DNP Monocular OD</div>
                         <div><span id="dpOD" class="measure-value text-blue-600">--</span><span class="measure-unit">mm</span></div>
                     </div>
                     <div class="measure-card">
-                        <div class="measure-label">DP Monocular OE</div>
+                        <div class="measure-label">DNP Monocular OE</div>
                         <div><span id="dpOE" class="measure-value text-blue-600">--</span><span class="measure-unit">mm</span></div>
                     </div>
                 </div>
@@ -373,7 +373,7 @@
                         <div><p class="text-xs text-slate-500">Confiança</p><p id="resultConfidence" class="text-lg font-bold text-emerald-600">--%</p></div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
-                        <div><p class="text-xs text-slate-500">DP OD / OE</p><p id="resultDPMono" class="text-sm font-bold text-slate-700">-- / -- mm</p></div>
+                        <div><p class="text-xs text-slate-500">DNP OD / OE</p><p id="resultDPMono" class="text-sm font-bold text-slate-700">-- / -- mm</p></div>
                         <div><p class="text-xs text-slate-500">Altura OD / OE</p><p id="resultHeight" class="text-sm font-bold text-slate-700">-- / -- mm</p></div>
                     </div>
                 </div>
@@ -402,7 +402,6 @@
     let currentStep = 0;
     let currentCameraMode = 'user';
     let videoStream = null;
-    let mpCamera = null;
     let faceMesh = null;
     let isFaceMeshReady = false;
     let latestLandmarks = null;
@@ -478,22 +477,58 @@
     }
 
     // ============ CAMERA FUNCTIONS ============
+    let availableCameras = [];
+    
+    async function getAvailableCameras() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            availableCameras = devices.filter(device => device.kind === 'videoinput');
+            console.log('📷 Câmeras disponíveis:', availableCameras.length);
+            availableCameras.forEach((cam, idx) => {
+                console.log(`  ${idx}: ${cam.label || 'Câmera ' + (idx + 1)}`);
+            });
+            return availableCameras;
+        } catch (err) {
+            console.error('Erro ao listar câmeras:', err);
+            return [];
+        }
+    }
+    
     async function startCamera() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             alert('Seu navegador não suporta acesso à câmera. Use Chrome ou Safari.');
             return;
         }
+        
         try {
+            // Listar câmeras disponíveis
+            await getAvailableCameras();
+            
             // Initialize MediaPipe Face Mesh first
             await initFaceMesh();
             
+            // Selecionar a câmera correta
+            let selectedCameraId = null;
+            
+            if (currentCameraMode === 'environment' && availableCameras.length > 1) {
+                // Tentar encontrar câmera traseira
+                // Em geral, a segunda câmera é a traseira em dispositivos móveis
+                selectedCameraId = availableCameras[1].deviceId;
+                console.log('📷 Usando câmera traseira:', selectedCameraId);
+            } else if (availableCameras.length > 0) {
+                // Usar câmera frontal (primeira câmera)
+                selectedCameraId = availableCameras[0].deviceId;
+                console.log('📷 Usando câmera frontal:', selectedCameraId);
+            }
+            
             const constraints = {
                 video: {
-                    facingMode: currentCameraMode,
+                    deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
                     width: { ideal: 1280 },
                     height: { ideal: 720 }
                 }
             };
+            
             videoStream = await navigator.mediaDevices.getUserMedia(constraints);
             const video = document.getElementById('videoElement');
             video.srcObject = videoStream;
@@ -521,14 +556,35 @@
     }
 
     async function toggleCamera() {
+        console.log('🔄 Alternando câmera...');
         const previousMode = currentCameraMode;
         currentCameraMode = currentCameraMode === 'user' ? 'environment' : 'user';
+        
         stopCamera();
         
         try {
+            // Atualizar lista de câmeras
+            await getAvailableCameras();
+            
+            // Selecionar a câmera correta
+            let selectedCameraId = null;
+            
+            if (currentCameraMode === 'environment' && availableCameras.length > 1) {
+                selectedCameraId = availableCameras[1].deviceId;
+                console.log('📷 Alternando para câmera traseira:', selectedCameraId);
+            } else if (availableCameras.length > 0) {
+                selectedCameraId = availableCameras[0].deviceId;
+                console.log('📷 Alternando para câmera frontal:', selectedCameraId);
+            }
+            
             const constraints = {
-                video: { facingMode: currentCameraMode, width: { ideal: 1280 }, height: { ideal: 720 } }
+                video: {
+                    deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
             };
+            
             videoStream = await navigator.mediaDevices.getUserMedia(constraints);
             const video = document.getElementById('videoElement');
             const overlay = document.getElementById('overlayCanvas');
@@ -551,6 +607,8 @@
             if (video.readyState >= 2) {
                 startFaceDetection(video);
             }
+            
+            console.log('✅ Câmera alternada com sucesso');
         } catch (err) {
             console.error('Toggle camera error:', err);
             // Reverter para o modo anterior
@@ -558,9 +616,23 @@
             
             // Reiniciar a câmera com o modo anterior
             try {
+                await getAvailableCameras();
+                
+                let selectedCameraId = null;
+                if (currentCameraMode === 'environment' && availableCameras.length > 1) {
+                    selectedCameraId = availableCameras[1].deviceId;
+                } else if (availableCameras.length > 0) {
+                    selectedCameraId = availableCameras[0].deviceId;
+                }
+                
                 const constraints = {
-                    video: { facingMode: currentCameraMode, width: { ideal: 1280 }, height: { ideal: 720 } }
+                    video: {
+                        deviceId: selectedCameraId ? { exact: selectedCameraId } : undefined,
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
                 };
+                
                 videoStream = await navigator.mediaDevices.getUserMedia(constraints);
                 const video = document.getElementById('videoElement');
                 const overlay = document.getElementById('overlayCanvas');
@@ -590,9 +662,20 @@
     }
 
     function stopCamera() {
-        if (mpCamera) { mpCamera.stop(); mpCamera = null; }
-        if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+        // Parar loop de processamento de frames
+        if (window.faceDetectionLoop) {
+            cancelAnimationFrame(window.faceDetectionLoop);
+            window.faceDetectionLoop = null;
+        }
+        
+        // Parar stream de vídeo
+        if (videoStream) { 
+            videoStream.getTracks().forEach(t => t.stop()); 
+            videoStream = null; 
+        }
+        
         resetAutoCapture();
+        console.log('🛑 Câmera parada');
     }
 
     function stopCameraAndGoBack() {
@@ -626,30 +709,31 @@
     }
 
     function startFaceDetection(video) {
-        if (mpCamera) {
-            mpCamera.stop();
-            mpCamera = null;
+        console.log('🎥 Iniciando detecção facial...');
+        
+        // Parar detecção anterior se existir
+        if (window.faceDetectionLoop) {
+            cancelAnimationFrame(window.faceDetectionLoop);
+            window.faceDetectionLoop = null;
         }
         
-        try {
-            mpCamera = new Camera(video, {
-                onFrame: async () => {
-                    if (faceMesh && isFaceMeshReady) {
-                        try {
-                            await faceMesh.send({ image: video });
-                        } catch (frameErr) {
-                            console.error('Frame processing error:', frameErr);
-                            // Não parar a câmera em caso de erro de frame
-                        }
-                    }
-                },
-                width: 1280,
-                height: 720
-            });
-            mpCamera.start();
-        } catch (err) {
-            console.error('Error starting face detection:', err);
+        // Função para processar frames manualmente
+        async function processFrame() {
+            if (faceMesh && isFaceMeshReady && video.readyState >= 2) {
+                try {
+                    await faceMesh.send({ image: video });
+                } catch (frameErr) {
+                    console.error('Frame processing error:', frameErr);
+                }
+            }
+            
+            // Continuar processando frames
+            window.faceDetectionLoop = requestAnimationFrame(processFrame);
         }
+        
+        // Iniciar loop de processamento
+        processFrame();
+        console.log('✅ Detecção facial iniciada');
     }
 
     // ============ FACE ANALYSIS ============
@@ -666,6 +750,13 @@
             
             // Calculate face analysis
             const analysis = analyzeFace(landmarks);
+            
+            // Debug log
+            if (!analysis || analysis.confidence === undefined || isNaN(analysis.confidence)) {
+                console.error('❌ analyzeFace retornou valor inválido:', analysis);
+                return;
+            }
+            
             latestConfidence = analysis.confidence;
             
             // Draw overlay
@@ -690,118 +781,168 @@
     }
 
     function analyzeFace(landmarks) {
-        // Get key points
-        const leftIris = getLandmarkCenter(landmarks, LANDMARKS.LEFT_IRIS);
-        const rightIris = getLandmarkCenter(landmarks, LANDMARKS.RIGHT_IRIS);
-        const noseTip = landmarks[LANDMARKS.NOSE_TIP];
-        const faceLeft = landmarks[LANDMARKS.FACE_LEFT];
-        const faceRight = landmarks[LANDMARKS.FACE_RIGHT];
-        const chin = landmarks[LANDMARKS.CHIN];
-        const forehead = landmarks[LANDMARKS.FOREHEAD];
-        
-        // Calculate pixel distances (normalized 0-1)
-        const ipdPixels = Math.sqrt(
-            (leftIris.x - rightIris.x) ** 2 + 
-            (leftIris.y - rightIris.y) ** 2
-        );
-        
-        const faceWidthPixels = Math.sqrt(
-            (faceLeft.x - faceRight.x) ** 2 + 
-            (faceLeft.y - faceRight.y) ** 2
-        );
-        
-        const faceHeightPixels = Math.sqrt(
-            (forehead.x - chin.x) ** 2 + 
-            (forehead.y - chin.y) ** 2
-        );
-        
-        // Estimate scale using average face width
-        // If no ArUco calibration, use anthropometric average
-        let mmPerPixel;
-        if (calibrationMode && calibrationScale !== 1.0) {
-            mmPerPixel = calibrationScale;
-        } else {
-            mmPerPixel = AVG_FACE_WIDTH / faceWidthPixels;
+        try {
+            // Get key points
+            const leftIris = getLandmarkCenter(landmarks, LANDMARKS.LEFT_IRIS);
+            const rightIris = getLandmarkCenter(landmarks, LANDMARKS.RIGHT_IRIS);
+            const noseTip = landmarks[LANDMARKS.NOSE_TIP];
+            const faceLeft = landmarks[LANDMARKS.FACE_LEFT];
+            const faceRight = landmarks[LANDMARKS.FACE_RIGHT];
+            const chin = landmarks[LANDMARKS.CHIN];
+            const forehead = landmarks[LANDMARKS.FOREHEAD];
+            
+            // Calculate pixel distances (normalized 0-1)
+            const ipdPixels = Math.sqrt(
+                (leftIris.x - rightIris.x) ** 2 + 
+                (leftIris.y - rightIris.y) ** 2
+            );
+            
+            const faceWidthPixels = Math.sqrt(
+                (faceLeft.x - faceRight.x) ** 2 + 
+                (faceLeft.y - faceRight.y) ** 2
+            );
+            
+            const faceHeightPixels = Math.sqrt(
+                (forehead.x - chin.x) ** 2 + 
+                (forehead.y - chin.y) ** 2
+            );
+            
+            // Estimate scale using average face width
+            // If no ArUco calibration, use anthropometric average
+            let mmPerPixel;
+            if (calibrationMode && calibrationScale !== 1.0) {
+                mmPerPixel = calibrationScale;
+            } else {
+                mmPerPixel = AVG_FACE_WIDTH / faceWidthPixels;
+            }
+            
+            // Calculate measurements in mm
+            const dpTotal = ipdPixels * mmPerPixel;
+            
+            // DNP - Distância Naso Pupilar (horizontal distance from each pupil to nose center)
+            // DNP OD (Right): horizontal distance from right pupil to nose
+            const dnpOD = Math.abs(noseTip.x - rightIris.x) * mmPerPixel;
+            
+            // DNP OE (Left): horizontal distance from left pupil to nose
+            const dnpOE = Math.abs(noseTip.x - leftIris.x) * mmPerPixel;
+            
+            // Pupillary height (distance from eye center to nose bottom reference)
+            const noseBottom = landmarks[LANDMARKS.NOSE_BOTTOM];
+            const leftEyeCenter = {
+                x: (landmarks[LANDMARKS.LEFT_EYE_TOP].x + landmarks[LANDMARKS.LEFT_EYE_BOTTOM].x) / 2,
+                y: (landmarks[LANDMARKS.LEFT_EYE_TOP].y + landmarks[LANDMARKS.LEFT_EYE_BOTTOM].y) / 2
+            };
+            const rightEyeCenter = {
+                x: (landmarks[LANDMARKS.RIGHT_EYE_TOP].x + landmarks[LANDMARKS.RIGHT_EYE_BOTTOM].x) / 2,
+                y: (landmarks[LANDMARKS.RIGHT_EYE_TOP].y + landmarks[LANDMARKS.RIGHT_EYE_BOTTOM].y) / 2
+            };
+            
+            const heightOD = Math.abs(rightEyeCenter.y - noseBottom.y) * mmPerPixel;
+            const heightOE = Math.abs(leftEyeCenter.y - noseBottom.y) * mmPerPixel;
+            
+            // Head tilt (angle between eye line and horizontal)
+            const eyeAngle = Math.atan2(
+                leftIris.y - rightIris.y,
+                leftIris.x - rightIris.x
+            ) * (180 / Math.PI);
+            const headTilt = Math.abs(eyeAngle);
+            
+            // Enhanced confidence calculation with multiple factors
+            let confidence = 0;
+            const confidenceDetails = {};
+            
+            // 1. Face centering (25 points max)
+            const faceCenterX = (faceLeft.x + faceRight.x) / 2;
+            const faceCenterY = (forehead.y + chin.y) / 2;
+            const centerPenalty = Math.sqrt((faceCenterX - 0.5) ** 2 + (faceCenterY - 0.5) ** 2);
+            const centeringScore = Math.max(0, 25 - centerPenalty * 80);
+            confidence += centeringScore;
+            confidenceDetails.centering = Math.round(centeringScore);
+            
+            // 2. Head tilt (20 points max)
+            const tiltScore = Math.max(0, 20 - headTilt * 1.5);
+            confidence += tiltScore;
+            confidenceDetails.tilt = Math.round(tiltScore);
+            
+            // 3. IPD range (20 points max)
+            let ipdScore = 0;
+            if (dpTotal >= 50 && dpTotal <= 80) ipdScore = 20;
+            else if (dpTotal >= 45 && dpTotal <= 85) ipdScore = 15;
+            else if (dpTotal >= 40 && dpTotal <= 90) ipdScore = 10;
+            else ipdScore = 5;
+            confidence += ipdScore;
+            confidenceDetails.ipd = ipdScore;
+            
+            // 4. Face size in frame (20 points max)
+            let faceSizeScore = 0;
+            if (faceWidthPixels > 0.25 && faceWidthPixels < 0.7) faceSizeScore = 20;
+            else if (faceWidthPixels > 0.20 && faceWidthPixels < 0.8) faceSizeScore = 15;
+            else if (faceWidthPixels > 0.15 && faceWidthPixels < 0.9) faceSizeScore = 10;
+            else faceSizeScore = 5;
+            confidence += faceSizeScore;
+            confidenceDetails.faceSize = faceSizeScore;
+            
+            // 5. Landmark quality (15 points max)
+            // Check if all essential landmarks are present
+            const essentialLandmarks = [
+                ...LANDMARKS.LEFT_IRIS,
+                ...LANDMARKS.RIGHT_IRIS,
+                LANDMARKS.NOSE_TIP,
+                LANDMARKS.LEFT_EYE_TOP,
+                LANDMARKS.LEFT_EYE_BOTTOM,
+                LANDMARKS.RIGHT_EYE_TOP,
+                LANDMARKS.RIGHT_EYE_BOTTOM
+            ];
+            let validLandmarks = 0;
+            essentialLandmarks.forEach(idx => {
+                if (landmarks[idx] && landmarks[idx].x !== undefined && landmarks[idx].y !== undefined) {
+                    validLandmarks++;
+                }
+            });
+            const landmarkScore = (validLandmarks / essentialLandmarks.length) * 15;
+            confidence += landmarkScore;
+            confidenceDetails.landmarks = Math.round(landmarkScore);
+            
+            // Bonus for perfect conditions (+10 points)
+            if (centeringScore >= 20 && tiltScore >= 18 && ipdScore === 20 && faceSizeScore === 20) {
+                confidence += 10;
+                confidenceDetails.bonus = 10;
+            }
+            
+            confidence = Math.min(100, Math.round(confidence));
+            
+            // Debug log
+            console.log('✅ Confiança calculada:', confidence, '%', confidenceDetails);
+            console.log('📏 DP Total:', dpTotal.toFixed(1), 'mm | DNP OD:', dnpOD.toFixed(1), 'mm | DNP OE:', dnpOE.toFixed(1), 'mm');
+            console.log('📐 Relação DNP/DP:', (dnpOD/dpTotal*100).toFixed(0), '% /', (dnpOE/dpTotal*100).toFixed(0), '%');
+            
+            return {
+                dpTotal: Math.round(dpTotal * 2) / 2,
+                dnpOD: Math.round(dnpOD * 2) / 2,
+                dnpOE: Math.round(dnpOE * 2) / 2,
+                heightOD: Math.round(heightOD * 10) / 10,
+                heightOE: Math.round(heightOE * 10) / 10,
+                headTilt: Math.round(headTilt * 10) / 10,
+                confidence,
+                leftIris, rightIris, noseTip,
+                faceLeft, faceRight, chin, forehead,
+                leftEyeCenter, rightEyeCenter, noseBottom,
+                faceWidthPixels, faceHeightPixels,
+                mmPerPixel
+            };
+        } catch (err) {
+            console.error('❌ Erro em analyzeFace:', err);
+            return {
+                dpTotal: 0,
+                dnpOD: 0,
+                dnpOE: 0,
+                heightOD: 0,
+                heightOE: 0,
+                headTilt: 0,
+                confidence: 0,
+                faceWidthPixels: 0
+            };
         }
-        
-        // Calculate measurements in mm
-        const dpTotal = ipdPixels * mmPerPixel;
-        
-        // Monocular DP (distance from face center to each iris)
-        // Face center is the midpoint between the two pupils
-        const faceCenterPupil = {
-            x: (leftIris.x + rightIris.x) / 2,
-            y: (leftIris.y + rightIris.y) / 2
-        };
-        
-        const dpOD = Math.sqrt(
-            (faceCenterPupil.x - rightIris.x) ** 2 + 
-            (faceCenterPupil.y - rightIris.y) ** 2
-        ) * mmPerPixel;
-        
-        const dpOE = Math.sqrt(
-            (faceCenterPupil.x - leftIris.x) ** 2 + 
-            (faceCenterPupil.y - leftIris.y) ** 2
-        ) * mmPerPixel;
-        
-        // Pupillary height (distance from eye center to nose bottom reference)
-        const noseBottom = landmarks[LANDMARKS.NOSE_BOTTOM];
-        const leftEyeCenter = {
-            x: (landmarks[LANDMARKS.LEFT_EYE_TOP].x + landmarks[LANDMARKS.LEFT_EYE_BOTTOM].x) / 2,
-            y: (landmarks[LANDMARKS.LEFT_EYE_TOP].y + landmarks[LANDMARKS.LEFT_EYE_BOTTOM].y) / 2
-        };
-        const rightEyeCenter = {
-            x: (landmarks[LANDMARKS.RIGHT_EYE_TOP].x + landmarks[LANDMARKS.RIGHT_EYE_BOTTOM].x) / 2,
-            y: (landmarks[LANDMARKS.RIGHT_EYE_TOP].y + landmarks[LANDMARKS.RIGHT_EYE_BOTTOM].y) / 2
-        };
-        
-        const heightOD = Math.abs(leftEyeCenter.y - noseBottom.y) * mmPerPixel;
-        const heightOE = Math.abs(rightEyeCenter.y - noseBottom.y) * mmPerPixel;
-        
-        // Head tilt (angle between eye line and horizontal)
-        const eyeAngle = Math.atan2(
-            leftIris.y - rightIris.y,
-            leftIris.x - rightIris.x
-        ) * (180 / Math.PI);
-        const headTilt = Math.abs(eyeAngle);
-        
-        // Confidence calculation
-        let confidence = 0;
-        
-        // Face must be roughly centered
-        const faceCenterX = (faceLeft.x + faceRight.x) / 2;
-        const faceCenterY = (forehead.y + chin.y) / 2;
-        const centerPenalty = Math.sqrt((faceCenterX - 0.5) ** 2 + (faceCenterY - 0.5) ** 2);
-        confidence += Math.max(0, 30 - centerPenalty * 100);
-        
-        // Face should not be too tilted
-        confidence += Math.max(0, 25 - headTilt * 2);
-        
-        // IPD should be in reasonable range (50-80mm)
-        if (dpTotal >= 50 && dpTotal <= 80) confidence += 25;
-        else if (dpTotal >= 45 && dpTotal <= 85) confidence += 15;
-        else confidence += 5;
-        
-        // Face should occupy reasonable portion of frame
-        if (faceWidthPixels > 0.25 && faceWidthPixels < 0.8) confidence += 20;
-        else confidence += 5;
-        
-        confidence = Math.min(100, Math.round(confidence));
-        
-        return {
-            dpTotal: Math.round(dpTotal * 2) / 2,
-            dpOD: Math.round(dpOD * 2) / 2,
-            dpOE: Math.round(dpOE * 2) / 2,
-            heightOD: Math.round(heightOD * 10) / 10,
-            heightOE: Math.round(heightOE * 10) / 10,
-            headTilt: Math.round(headTilt * 10) / 10,
-            confidence,
-            leftIris, rightIris, noseTip,
-            faceLeft, faceRight, chin, forehead,
-            leftEyeCenter, rightEyeCenter, noseBottom,
-            faceWidthPixels, faceHeightPixels,
-            mmPerPixel
-        };
     }
 
     function drawOverlay(landmarks, analysis) {
@@ -897,31 +1038,47 @@
         ctx.textAlign = 'center';
         ctx.fillText(`${analysis.dpTotal} mm`, midX, midY + 5);
         
-        // Draw monocular lines (face center to each iris)
-        const faceCenter = {
-            x: ((analysis.leftIris.x + analysis.rightIris.x) / 2) * w,
-            y: ((analysis.leftIris.y + analysis.rightIris.y) / 2) * h
-        };
-        
-        // Draw center point
+        // Draw DNP lines (pupil to nose tip)
+        // Draw DNP OD (right pupil to nose)
         ctx.beginPath();
-        ctx.arc(faceCenter.x, faceCenter.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(139, 92, 246, 0.8)';
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        
-        ctx.beginPath();
-        ctx.moveTo(faceCenter.x, faceCenter.y);
-        ctx.lineTo(analysis.leftIris.x * w, analysis.leftIris.y * h);
-        ctx.moveTo(faceCenter.x, faceCenter.y);
-        ctx.lineTo(analysis.rightIris.x * w, analysis.rightIris.y * h);
-        ctx.strokeStyle = 'rgba(59, 130, 246, 0.5)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([3, 3]);
+        ctx.moveTo(analysis.rightIris.x * w, analysis.rightIris.y * h);
+        ctx.lineTo(nose.x * w, nose.y * h);
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
         ctx.stroke();
         ctx.setLineDash([]);
+        
+        // Draw DNP OE (left pupil to nose)
+        ctx.beginPath();
+        ctx.moveTo(analysis.leftIris.x * w, analysis.leftIris.y * h);
+        ctx.lineTo(nose.x * w, nose.y * h);
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Draw DNP values
+        const dnpODMidX = ((analysis.rightIris.x + nose.x) / 2) * w;
+        const dnpODMidY = ((analysis.rightIris.y + nose.y) / 2) * h;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.roundRect(dnpODMidX - 30, dnpODMidY - 10, 60, 20, 4);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`DNP OD: ${analysis.dnpOD}mm`, dnpODMidX, dnpODMidY + 4);
+        
+        const dnpOEMidX = ((analysis.leftIris.x + nose.x) / 2) * w;
+        const dnpOEMidY = ((analysis.leftIris.y + nose.y) / 2) * h;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.roundRect(dnpOEMidX - 30, dnpOEMidY - 10, 60, 20, 4);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`DNP OE: ${analysis.dnpOE}mm`, dnpOEMidX, dnpOEMidY + 4);
     }
 
     // ============ UI UPDATES ============
@@ -960,17 +1117,26 @@
         const info = document.getElementById('landmarkInfo');
         const btn = document.getElementById('captureBtn');
         
+        // Debug log
+        console.log('📊 updateUI_FaceDetected chamada com confidence:', analysis.confidence);
+        
+        if (!conf || !fill || !status) {
+            console.error('❌ Elementos HTML não encontrados');
+            return;
+        }
+        
         conf.textContent = `${analysis.confidence}%`;
         fill.style.width = `${analysis.confidence}%`;
         
         if (analysis.confidence >= 70) {
-            status.textContent = '✓ Rosto detectado';
-            status.className = 'text-sm font-bold text-emerald-400';
-            fill.style.background = '#10b981';
-            btn.disabled = false;
+            document.getElementById('faceStatus').textContent = '✓ Rosto detectado';
+            document.getElementById('faceStatus').className = 'text-sm font-bold text-emerald-400';
+            document.getElementById('confidenceValue').textContent = analysis.confidence + '%';
+            document.getElementById('confidenceFill').style.width = analysis.confidence + '%';
+            document.getElementById('captureBtn').disabled = false;
             
-            // Verifica se deve iniciar captura automática
-            if (autoCaptureEnabled && analysis.confidence >= 85) {
+            // Verifica se deve iniciar captura automática (threshold de 75%)
+            if (autoCaptureEnabled && analysis.confidence >= 75) {
                 startAutoCaptureCountdown(analysis);
             } else {
                 resetAutoCapture();
@@ -989,7 +1155,7 @@
             resetAutoCapture();
         }
         
-        info.textContent = `DP: ${analysis.dpTotal}mm | Inclinação: ${analysis.headTilt}° | OD: ${analysis.dpOD}mm | OE: ${analysis.dpOE}mm`;
+        info.textContent = `DP: ${analysis.dpTotal}mm | Inclinação: ${analysis.headTilt}° | DNP OD: ${analysis.dnpOD}mm | DNP OE: ${analysis.dnpOE}mm`;
         
         // Atualiza guia de IA
         updateGuidance(analysis);
@@ -1166,13 +1332,13 @@
             };
         }
         // Prioridade 7: Tudo correto - pronto para capturar
-        else if (analysis.confidence >= 70) {
+        else if (analysis.confidence >= 75) {
             guidance = {
                 icon: '✨',
                 iconClass: 'success',
                 message: 'Excelente! Posição perfeita',
-                submessage: 'Toque no botão para capturar a medição',
-                capturing: false
+                submessage: 'Captura automática ativada',
+                capturing: true
             };
         }
         // Prioridade 8: Quase lá
@@ -1231,8 +1397,8 @@
 
     function showValidation(analysis) {
         document.getElementById('dpTotal').textContent = analysis.dpTotal.toFixed(1);
-        document.getElementById('dpOD').textContent = analysis.dpOD.toFixed(1);
-        document.getElementById('dpOE').textContent = analysis.dpOE.toFixed(1);
+        document.getElementById('dpOD').textContent = analysis.dnpOD.toFixed(1);
+        document.getElementById('dpOE').textContent = analysis.dnpOE.toFixed(1);
         document.getElementById('heightOD').textContent = analysis.heightOD.toFixed(1);
         document.getElementById('heightOE').textContent = analysis.heightOE.toFixed(1);
         document.getElementById('headTilt').textContent = analysis.headTilt.toFixed(1);
@@ -1265,7 +1431,7 @@
         document.getElementById('resultDate').textContent = date;
         document.getElementById('resultDPTotal').textContent = `${m.dpTotal.toFixed(1)} mm`;
         document.getElementById('resultConfidence').textContent = `${m.confidence}%`;
-        document.getElementById('resultDPMono').textContent = `${m.dpOD.toFixed(1)} / ${m.dpOE.toFixed(1)} mm`;
+        document.getElementById('resultDPMono').textContent = `${m.dnpOD.toFixed(1)} / ${m.dnpOE.toFixed(1)} mm`;
         document.getElementById('resultHeight').textContent = `${m.heightOD.toFixed(1)} / ${m.heightOE.toFixed(1)} mm`;
         
         goToStep(5);
@@ -1427,8 +1593,8 @@
             `👤 *Paciente:* ${name}\n` +
             `📅 *Data:* ${date}\n\n` +
             `📏 *DP Total:* ${m.dpTotal.toFixed(1)} mm\n` +
-            `👁 *DP OD:* ${m.dpOD.toFixed(1)} mm\n` +
-            `👁 *DP OE:* ${m.dpOE.toFixed(1)} mm\n` +
+            `👁 *DNP OD:* ${m.dnpOD.toFixed(1)} mm\n` +
+            `👁 *DNP OE:* ${m.dnpOE.toFixed(1)} mm\n` +
             `📐 *Altura OD:* ${m.heightOD.toFixed(1)} mm\n` +
             `📐 *Altura OE:* ${m.heightOE.toFixed(1)} mm\n` +
             `🔄 *Inclinação:* ${m.headTilt.toFixed(1)}°\n` +
